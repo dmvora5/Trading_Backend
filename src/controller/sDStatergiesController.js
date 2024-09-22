@@ -5,10 +5,16 @@ const schedulerManager = require("../SchedulerManager/schedulerManager");
 const { sdStatergy } = require("../strategies/sdStatergy");
 const ErrorHandler = require("../Error/ErrorHandler");
 const Statergy = require("../db/models/Statergy");
+const { default: mongoose } = require("mongoose");
+const SdFilteredStock = require("../db/models/SdFilteredStock");
 
 exports.getSdStatergysAction = catchAsyncError(async (req, res, next) => {
+
+    const { type } = req.query;
+
     const statergies = await Statergy.find({
-        statergyName: 'SD'
+        statergyName: 'SD',
+        type
     });
 
     res.status(200).json({
@@ -20,18 +26,23 @@ exports.getSdStatergysAction = catchAsyncError(async (req, res, next) => {
 
 
 exports.addSdStatergyAction = catchAsyncError(async (req, res, next) => {
-    const { timeFrame, eventName, level = false, type, query = {} } = req.body;
+    const { timeFrame, level = false, type, query = {} } = req.body;
 
-    const statergyName = `SD-${timeFrame}`;
+    console.log('query', query)
+
+    const statergyName = `SD-${timeFrame}-${query?.index}-${type}`;
 
     const existingStatergy = await Statergy.findOne({
         statergyName: 'SD',
-        name: statergyName
+        name: statergyName,
+        type: type
     }).lean();
 
-    if(existingStatergy) {
+    if (existingStatergy) {
         return next(new ErrorHandler("Statergy already exist"));
     }
+
+    const eventName = type === 'INTERVAL' ? `SD${timeFrame}INTERVAL` : null
 
     await Statergy.create({
         statergyName: 'SD',
@@ -44,7 +55,7 @@ exports.addSdStatergyAction = catchAsyncError(async (req, res, next) => {
             level: level
         },
     })
-   
+
 
     res.status(200).json({
         success: true,
@@ -57,7 +68,7 @@ exports.runSdStatergyAction = catchAsyncError(async (req, res, next) => {
 
     const { id } = req.body;
 
-    const statergy = await Statergy.findById(id).lean();
+    const statergy = await Statergy.findById(id);
     if (statergy) {
 
         if (schedulerManager.listJobs().includes(statergy.name)) {
@@ -69,12 +80,12 @@ exports.runSdStatergyAction = catchAsyncError(async (req, res, next) => {
             initialMinute: 16,
             intervalMinutes: 5,
             jobFunction: sdStatergy.bind(null, {
-                timeFrame: statergy.timeFrame,
-                query: statergy.query,
-                eventName: statergy.eventName,
-                level: statergy?.fields?.level === 'true' ? true : false
+                statergy
             })
         });
+
+        statergy.running = true;
+        await statergy.save();
 
         return res.status(200).json({
             success: true,
@@ -90,11 +101,21 @@ exports.runSdStatergyAction = catchAsyncError(async (req, res, next) => {
 
 });
 
-exports.stopSdStatergyAction = catchAsyncError(async(req, res, next) => {
-    const { name } = req.body;
+exports.stopSdStatergyAction = catchAsyncError(async (req, res, next) => {
+    const { id } = req.body;
 
-    schedulerManager.removeJob(name);
-    schedulerManager.removeJobGroup(name);
+    const statergy = await Statergy.findById(id);
+
+    if (!statergy) {
+        return next(new ErrorHandler("Statergy not found!", 400))
+    }
+
+    schedulerManager.removeJob(statergy.name);
+    schedulerManager.removeJobGroup(statergy.name);
+
+    statergy.running = false;
+    await statergy.save();
+
     res.status(200).json({
         success: true,
         message: "Statergy stopped successfully!"
@@ -102,16 +123,27 @@ exports.stopSdStatergyAction = catchAsyncError(async(req, res, next) => {
 })
 
 
-exports.deleteSdStatergyAction = catchAsyncError(async(req, res, next) => {
-    const { id } = req.body;
+exports.deleteSdStatergyAction = catchAsyncError(async (req, res, next) => {
+    const { id } = req.params;
 
-    await Statergy.findByIdAndDelete(id)
+    // Find and delete the strategy in one query
+    const statergy = await Statergy.findByIdAndDelete(id);
 
-    schedulerManager.removeJob(name);
-    schedulerManager.removeJobGroup(name);
+    if (!statergy) {
+        return res.status(404).json({
+            success: false,
+            message: "Statergy not found!"
+        });
+    }
+
+    // Remove the associated jobs and job group
+    schedulerManager.removeJob(statergy.name);
+    schedulerManager.removeJobGroup(statergy.name);
+
+
     res.status(200).json({
         success: true,
-        message: "Statergy delete successfully!"
+        message: "Statergy deleted successfully!"
     });
 });
 
@@ -125,17 +157,82 @@ exports.updateSdStatergyAction = catchAsyncError(async (req, res, next) => {
         return next(new ErrorHandler("Statergy is running please stop before!", 400))
     }
 
-        statergy.name= name || statergy.name,
-        statergy.type= type || statergy.type,
-        statergy.fields= {
+    statergy.name = name || statergy.name,
+        statergy.type = type || statergy.type,
+        statergy.fields = {
             level: level || statergy.level,
         },
-        statergy.query= query || statergy.query || {}
-    
-        await statergy.save();
+        statergy.query = query || statergy.query || {}
+
+    await statergy.save();
 
     res.status(200).json({
         success: true,
         message: "Statergies updated successfully!"
     });
+})
+
+exports.startRunningStatergy = catchAsyncError(async (req, res, next) => {
+
+    // Find all running strategies with matching _ids
+    const strategies = await Statergy.find({
+        running: true,
+        type: "INTERVAL"
+    }).lean();
+
+    let message = '';
+
+    // Add jobs for strategies that are not already scheduled
+    strategies?.forEach(statergy => {
+        if (!schedulerManager.listJobs().includes(statergy.name)) {
+
+            schedulerManager.addJob(statergy.name, {
+                initialHour: 9,
+                initialMinute: 16,
+                intervalMinutes: 5,
+                jobFunction: sdStatergy.bind(null, {
+                    statergy
+                })
+            });
+
+            message = "Strategies run successfully!"
+        }
+    });
+
+    // Return success response
+    return res.status(200).json({
+        success: true,
+        message: message
+    });
+});
+
+exports.getSdFilteredData = catchAsyncError(async (req, res, next) => {
+    const { sid } = req.params;
+    const data = await SdFilteredStock.find({
+        sid
+    });
+
+    res.status(200).json({
+        success: true,
+        data
+    })
+})
+
+exports.runSdFilterAction = catchAsyncError(async(req, res, next) => {
+    const { id } = req.query;
+
+    console.log('id', id)
+    const filter = await Statergy.findById(id);
+    if(!filter) {
+        return next(new ErrorHandler("No filter found!", 400));
+    }
+    
+    const data = await sdStatergy({
+        statergy: filter
+    });
+
+    res.status(200).json({
+        success: true,
+        data
+    })
 })

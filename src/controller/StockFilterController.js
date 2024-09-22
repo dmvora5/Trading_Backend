@@ -1,22 +1,15 @@
+const Stocks = require("../db/models/Stocks");
 const { sdStatergy } = require("../strategies/sdStatergy");
 const { catchAsyncError } = require("../utils");
 
 
 
 
-exports.strucralSDFilter = catchAsyncError(async (req, res, next) => {
+exports.getIndicesAction = catchAsyncError(async (req, res, next) => {
+    const indices = await Stocks.distinct('index');
 
-    const { timeFrame, query } = req.query;
-
-    const stocks = await sdStatergy({
-        timeFrame,
-        query
-    })
-
-    return res.status(200).json({
+    res.status(200).json({
         success: true,
-        data: stocks,
-        message: "Filtered stocks",
+        data: indices
     });
-
-});
+})

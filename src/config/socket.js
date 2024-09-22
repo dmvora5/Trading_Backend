@@ -8,9 +8,10 @@ function configureSocket(io) {
 }
 
 
-async function getSelectedStock({eventName, data}) {
+async function getSelectedStock({eventName, data, callBack}) {
     try {
         global.io.emit(eventName, data)
+        callBack(data)
     } catch (err) {
         logger.error("[Error in getSelectedStock]" + err.message);
         console.log('err', err)

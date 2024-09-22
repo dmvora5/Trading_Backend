@@ -1,14 +1,16 @@
 const mongoose = require('mongoose');
 
 const schema = new mongoose.Schema({
-    type: {type: String, enum: ["INTERVAL", "FILTER"]},
+    type: { type: String, enum: ["INTERVAL", "FILTER"] },
     name: String,
     statergyName: String,
     timeFrame: String,
     eventName: String,
+    running: { type: Boolean, default: false },
+    isMultiTimeFrame: { type: Boolean, default: false, },
+    multiTimeFrams: [String],
     query: {
-        type: Map,
-        of: String
+        type: Object,
     },
     fields: {
         type: Map,
