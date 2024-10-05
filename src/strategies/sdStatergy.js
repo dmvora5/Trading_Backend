@@ -142,6 +142,7 @@ const sdStatergy = async ({
         const filter = [];
 
         const count = await Stocks.countDocuments(statergy.query || {});
+        console.log('count', count)
         const totalPages = Math.ceil(count / pageSize);
 
         for (let i = 1; i <= totalPages; i++) {

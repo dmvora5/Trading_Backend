@@ -228,7 +228,8 @@ exports.runSdFilterAction = catchAsyncError(async(req, res, next) => {
     }
     
     const data = await sdStatergy({
-        statergy: filter
+        statergy: filter,
+        lookBackCandlesForSignal: 1
     });
 
     res.status(200).json({
